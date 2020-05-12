@@ -250,9 +250,9 @@ function reducer(state = INITIAL_STATE, action) {
 const INITIAL_STATE = { todos: [] };
 ```
 
-- 리덕스는 스토어 생성 시 상탯값이 없는 상태로 리듀서를 호출하므로 매개변수의 기본값을 사용해서 초기 상탯값 정의
+- 리덕스는 스토어 생성 시 상탯값이 없는 상태로 리듀서를 호출함으로 매개변수의 기본값을 사용해서 초기 상탯값 정의
 - 각 액견 타입별로 case 문을 만들어서 처리
-- 상탯값은 불변 객체로 관리해야 하므로 수정할 때마다 새로운 객체 생성,
+- 상탯값은 불변 객체로 관리해야함으로 수정할 때마다 새로운 객체 생성,
   ...(전개 연산자)를 사용하면 상탯값을 불변 객체로 관리 가능
 - default: 처리할 액션이 없다면 상탯값을 변경하지 않음
 
@@ -453,7 +453,7 @@ const ADD = "friend/ADD";
 const REMOVE = "friend/REMOVE";
 const EDIT = "friend/EDIT";
 
-// 액션 생성자 함수 정의, 외부에서 사용해야 하므로 export 사용
+// 액션 생성자 함수 정의, 외부에서 사용해야 함으로 export 사용
 export const addFriend = (friend) => ({ type: ADD, friend });
 export const removeFriend = (friend) => ({ type: REMOVE, friend });
 export const editFriend = (friend) => ({ type: EDIT, friend });
@@ -1010,3 +1010,560 @@ ReactDOM.render(
 - `npm start` 명령어로 프로젝트 실행 후 렌더링된 버튼을 클릭하면 데이터가 리덕스의 상탯값에 추가됨
 - 화면은 정상적으로 렌더링되지만 타임라인 추가 버튼을 누를 때도 FriendMain 컴포넌트의 render 메서드가 호출됨
 - 각각의 render 메서드는 그에 맞는 데이터가 변경될 때만 호출되도록 하는 것이 좋음
+
+### FriendMain 개선하기
+
+> 불필요하게 render 메서드가 호출되지 않도록 friend/container/FriendMain.js 코드 개선
+
+```javascript
+// ...
+class FriendMain extends PureComponent { // PureComponent 상속
+  // state 정의
+  state = {
+    // 리덕스 상탯값으로부터 초기 상탯값을 가져옴
+    friends: store.getState().friend.friends,
+  };
+
+  componentDidMount() {
+    this.unsubscribe = store.subscribe(() =>
+      // setState 메서드 사용
+      this.setState({ friends: store.getState().friend.friends })
+    );
+  }
+// ...
+```
+
+- 상탯값이 변경되는 경우에만 render 메서드가 호출되도록 PureComponent 상속
+- state로 컴포넌트 상태값 정의
+- componentDidMount 함수 내부에서 forceUpdate 메서드를 setState 메서드로 변경
+  → setState 메서드를 호출하면 shouldComponentUpdate 생명 주기 메서드가 호출되고, 상탯값이 변경되지 않으면 render 메서드가 호출되지 않음
+- 이제 타임라인 추가 버튼을 눌러도 FriendMain 컴포넌트의 render 메서드는 호출되지 않음
+
+## react-redux 패키지 사용하기
+
+> 위에서 작성한 코드를 기반으로 react-redux 패키지 사용
+
+### 설치
+
+```bash
+$ npm i react-redux
+```
+
+### Provider 컴포넌트 사용
+
+> Provider 컴포넌트는 react-redux에서 제공하는 컴포넌트로,
+> Provider 컴포넌트 하위에 있는 컴포넌트는 리덕스의 상탯값이 변경되면 자동으로 렌더 함수가 호출되도록 할 수 있음
+>
+> index.js 파일을 다음과 같이 수정
+
+```javascript
+// ...
+import store from "./common/store";
+import { Provider } from "react-redux";
+
+ReactDOM.render(
+  <Provider store={store}>
+    <div>
+      <FriendMain />
+      <TimelineMain />
+    </div>
+  </Provider>,
+  document.getElementById("root")
+);
+
+```
+
+- 스토어 객체를 Provider 컴포넌트의 속성값으로 전달
+- Provider 컴포넌트는 전달받은 스토어 객체의 subscribe 메서드를 호출해서 액션 처리가 끝날 때마다 알림을 받음
+- 그 다음 컨텍스트 API를 사용해서 리덕스의 상탯값을 하위 컴포넌트로 전달
+
+### FriendMain 컴포넌트 리팩터링
+
+> FriendMain 컴포넌트가 react-redux를 사용하도록 FreindMain.js 파일을 다음과 같이 수정
+
+```javascript
+// ...
+import { connect } from "react-redux";
+
+class FriendMain extends Component {
+  onAdd = () => {
+    const friend = getNextFriend();
+    
+    // mapDispatchToProps 함수로부터 전달받은
+    // addFriend 함수를 호출해서 리덕스의 상탯값 변경
+    this.props.addFriend(friend);
+  };
+
+  render() {
+    console.log("FriendMain render");
+     
+    // mapStateToProps 함수로 전달받은 friends 데이터 사용
+    const { friends } = this.props;
+    return (
+      <div>
+        <button onClick={this.onAdd}>친구 추가</button>
+        <FriendList friends={friends} />
+      </div>
+    );
+  }
+}
+
+const mapStateToProps = (state) => {
+  return { friends: state.friend.friends };
+};
+
+const mapDispatchToProps = (dispatch) => {
+  return {
+    addFriend: (friend) => {
+      dispatch(addFriend(friend));
+    },
+  };
+};
+
+export default connect(mapStateToProps, mapDispatchToProps)(FriendMain);
+```
+
+- connect: 컴포넌트가 리덕스 상탯값 변경에 반응하기 위해서는 react-redux에서 제공하는 connect 함수를 사용해야 함
+  → connect 함수 호출 시 고차 컴포넌트가 생성되고 해당 컴포넌트에 직접 만든 컴포넌트를 전달(여기서는 FriendMain)
+- mapStateToProps: 리덕스 상탯값을 기반으로 컴포넌트에서 사용할 데이터를 속성값으로 전달
+- mapDispatchToProps: 리덕스의 상탯값을 변경하는 함수를 컴포넌트의 속성값으로 전달
+- 프로젝트 실행 후 타임라인 버튼을 클릭해도 FriendMain 컴포넌트의 render 메서드는 호출되지 않음
+  → connect 함수로 생성한 고차 컴포넌트는 입력된 컴포넌트로 전달하는 속성값에 변화가 없다면 입력된 컴포넌트를 다시 렌더링하지 않음
+
+### mapDispatchToProps 함수 없이 액션 생성자 함수 전달
+
+> mapDispatchToProps 함수를 단순히 액션 생성자 함수와 dispatch 메서드를 연결하는 목적으로 사용한다면 다음과 같이 간편하게 작성 가능
+
+```javascript
+import * as actions from '../state';
+// ...
+export default connect(mapStateToProps, actions)(FriendMain);
+
+// mapDispatchToProps 함수로 액션 함수를 전달하는 예
+const mapDispatchToProps = dispatch => {
+    return {
+        addFriend: friend => {
+            dispatch(addFriend(friend));
+        },
+        removeFriend: friend => {
+            dispatch(removeFriend(friend));
+        },
+        editFriend: friend => {
+            dispatch(editFriend(friend));
+        },
+    };
+};
+```
+
+- 모든 액션 생성자 함수를 actions 객체로 가져옴
+- export default 키워드를 이용해서 내보낸 리듀서 함수가 default라는 이름으로 같이 넘어오지만 큰 문제는 되지 않음
+- connect 함수의 두 번째 인자로 객체를 전달하면 그 객체를 액션 생성자 함수를 모아 놓은 객체로 인식
+- 매개변수의 개수가 많아도 잘 동작하며, 단순하게 dispatch 함수를 연결하는 경우에는 액션 생성자 함수를 모아 놓은 객체를 전달하는 게 편함
+
+# Reselect 패키지로 선택자 함수 만들기
+
+> reselect 패키지는 원본 데이터를 다양한 형태로 가공해서 사용할 수 있도록 도와줌
+> 특히 리덕스의 데이터를 리액트 컴포넌트에서 필요한 데이터로 가공하는 용도로 많이 사용
+
+## 구현 기능
+
+1. 친구 목록에 연령 제한 옵션과 개수 제한 옵션 추가
+2. 연령 제한을 적용한 친구 목록과 연령/개수 제한을 모두 적용한 친구 목록을 보여줌
+
+## reselect 패키지 없이 구현해 보기
+
+### 옵션 선택 컴포넌트 작성
+
+> 옵션을 선택할 수 있는 기능을 가진 컴포넌트 작성
+> friend/component 폴더 밑에 NumberSelect.js 파일 작성
+
+```javascript
+import React, { Component } from "react";
+
+class NumberSelect extends Component {
+  onChange = (e) => {
+    const value = Number(e.currentTarget.value);
+
+    // 사용자가 옵션을 선택하면 이를 부모 컴포넌트에 알림
+    this.props.onChange(value);
+  };
+  render() {
+    const { value, options, postfix } = this.props;
+    return (
+      <div>
+        <select onChange={this.onChange} value={value}>
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        {postfix}
+      </div>
+    );
+  }
+}
+
+export default NumberSelect;
+```
+
+- 부모 컴포넌트가 알려 준 옵션 목록을 화면에 출력
+- 주어진 속성값으로 화면을 그리기만 함으로 프레젠테이션 컴포넌트로 작성
+
+### 상수 관리 파일 작성
+
+> 연령 제한과 개수 제한의 최댓값을 관리하는 파일
+> friend 폴더 밑에 common.js 파일 작성
+
+```javascript
+export const MAX_AGE_LIMIT = 30;
+export const MAX_SHOW_LIMIT = 8;
+```
+
+- friend 폴더 밑에 있는 여러 파일에서 공통으로 사용되는 상숫값 관리
+
+### 친구 목록 릭덕스 코드 리팩터링
+
+> 연령 제한과 개수 제한 정보를 관리하기 위해 friend/state.js 파일 수정
+
+```javascript
+import createReducer from "../common/createReducer";
+import createItemsLogic from "../common/createItemsLogic";
+import mergeReducers from "../common/mergeReducers";
+import { MAX_AGE_LIMIT, MAX_SHOW_LIMIT } from "./common";
+
+const { add, remove, edit, reducer: friendsReducer } = createItemsLogic(
+  "friends"
+);
+
+const SET_AGE_LIMIT = "friend/SET_AGE_LIMIT";
+const SET_SHOW_LIMIT = "friend/SET_SHOW_LIMIT";
+
+export const addFriend = add;
+export const removeFriend = remove;
+export const editFriend = edit;
+
+export const setAgeLimit = (ageLimit) => ({ type: SET_AGE_LIMIT, ageLimit });
+export const setShowLimit = (showLimit) => ({
+  type: SET_SHOW_LIMIT,
+  showLimit,
+});
+
+const INITIAL_STATE = { ageLimit: MAX_AGE_LIMIT, showLimit: MAX_SHOW_LIMIT };
+
+const reducer = createReducer(INITIAL_STATE, {
+  [SET_AGE_LIMIT]: (state, action) => (state.ageLimit = action.ageLimit),
+  [SET_SHOW_LIMIT]: (state, action) => (state.showLimit = action.showLimit),
+});
+
+const reducers = [reducer, friendsReducer];
+export default mergeReducers(reducers);
+```
+
+- 연령/개수 제한 정보를 처리하는 액션 타입, 액션 생성자 함수, 리듀서 함수 작성
+- 초기 상탯값으로 연령/개수 최댓값 입력
+- 친구 목록을 처리하는 리듀서 함수와 하나로 합침
+
+### FriendMain 컴포넌트 리팩터링
+
+> FriendMain.js 파일 수정
+
+```javascript
+import React, { Component } from "react";
+import { getNextFriend } from "../../common/mockData";
+import FriendList from "../component/FriendList";
+import { connect } from "react-redux";
+import * as actions from "../state";
+import NumberSelect from "../component/NumberSelect";
+import { MAX_AGE_LIMIT, MAX_SHOW_LIMIT } from "../common";
+
+class FriendMain extends Component {
+  onAdd = () => {
+    const friend = getNextFriend();
+    this.props.addFriend(friend);
+  };
+
+  render() {
+    console.log("FriendMain render");
+    const {
+      friendsWithAgeLimit,
+      friendsWithAgeShowLimit,
+      ageLimit,
+      showLimit,
+      setAgeLimit,
+      setShowLimit,
+    } = this.props;
+    return (
+      <div>
+        <button onClick={this.onAdd}>친구 추가</button>
+		
+		// 연령 제한 옵션
+        <NumberSelect
+          onChange={setAgeLimit}
+          value={ageLimit}
+          options={ageLimitOptions}
+          postfix="세 이하만 보기"
+        />
+        <FriendList friends={friendsWithAgeLimit} />
+            
+        // 개수 제한 옵션
+        <NumberSelect
+          onChange={setShowLimit}
+          value={showLimit}
+          options={showLimitOptions}
+          postfix="명 이하만 보기(연령 제한 적용)"
+        />
+        <FriendList friends={friendsWithAgeShowLimit} />
+      </div>
+    );
+  }
+}
+
+// 연령 & 개수 제한 옵션
+const ageLimitOptions = [15, 20, 25, MAX_AGE_LIMIT];
+const showLimitOptions = [2, 4, 6, MAX_SHOW_LIMIT];
+
+const mapStateToProps = (state) => {
+  const friends = state.friend.friends;
+  const ageLimit = state.friend.ageLimit;
+  const showLimit = state.friend.showLimit;
+   
+  // 연령 제한이 적용된 친구 목록
+  const friendsWithAgeLimit = friends.filter(
+    (friend) => friend.age <= ageLimit
+  );
+    
+  // 연령 & 개수 제한이 적용된 친구 목록
+  const friendsWithAgeShowLimit = friendsWithAgeLimit.slice(0, showLimit);
+  return {
+    // 컴포넌트의 속성값으로 전달
+    friendsWithAgeLimit,
+    friendsWithAgeShowLimit,
+    ageLimit,
+    showLimit,
+  };
+};
+
+// 액션 생성자 함수 전체를 actions 객체로 전달
+export default connect(mapStateToProps, actions)(FriendMain);
+```
+
+- 연령 제한 옵션 선택 시 setAgeLimit 함수가 호출되고, 리덕스 상탯값 변경
+- 개수 제한 옵션 선택 시 setShowLimit 함수 호출, 리덕스 상탯값 변경
+- *mapStateToProps 함수 내부에서 리덕스에 저장된 원본 데이터를 화면에 보여 줄 데이터로 가공*
+- *※ 문제점: 친구 목록이 변경되지 않았을 때도 데이터를 가공하는 연산이 수행되며, 이는 데이터양이 증가할수록 불필요한 연산도 증가하게 되는 원인이 됨*
+
+## reselect 패키지 사용하기
+
+> 지금까지 작성한 코드를 reselect 패키지를 사용하는 코드로 리팩터링
+
+### 개요
+
+- reselect 패키지를 사용할 때는 선택자(selector) 함수를 작성해야 함
+- reselect 패키지는 메모이제이션 기능이 있기 때문에 연산에 사용되는 데이터가 변경된 경우에만 연산을 수행
+- 데이터가 변경되지 않았다면 이전 결괏값을 재사용
+- 데이터 가공 코드를 컴포넌트 파일에서 분리함으로써 컴포넌트 파일에서는 UI 코드에 집중할 수 있게 됨
+
+### 설치
+
+```bash
+$ npm i reselect
+```
+
+### 친구 목록 데이터의 선택자 함수 만들기
+
+> 리덕스의 데이터를 컴포넌트에 원하는 방식으로 전달하기 위해 데이터를 가공하는 함수를 **선택자**라고 할 수 있음
+
+1. 상탯값 처리 파일들을 한곳에 모으기 위해 friend 폴더 밑에 state 폴더 생성
+2. friend/state.js 파일을 friend/state/index.js 경로로 이동
+3. friend/state 폴더 밑에 선택자 함수를 작성할 selector.js 파일 작성
+
+```javascript
+import { createSelector } from "reselect";
+
+const getFriends = (state) => state.friend.friends;
+export const getAgeLimit = (state) => state.friend.ageLimit;
+export const getShowLimit = (state) => state.friend.showLimit;
+
+// 연령 제한이 적용된 친구 목록을 반환하는 선택자 함수
+export const getFriendsWithAgeLimit = createSelector(
+    
+  // friends, ageLimit이 변경될 때만 연산 수행
+  [getFriends, getAgeLimit],
+  (friends, ageLimit) => friends.filter((friend) => friend.age <= ageLimit)
+);
+
+export const getFriendsWithAgeShowLimit = createSelector(
+    
+  // friends, ageLimit, showLimit이 변경될 때만 연산 수행
+  [getFriendsWithAgeLimit, getShowLimit],
+  (friendsWithAgeLimit, showLimit) => friendsWithAgeLimit.slice(0, showLimit)
+);
+```
+
+- crreateSelector 함수를 이용해서 선택자 함수 생성
+- createSelector 로 만든 선택자 함수로 전달되는 인수는 첫 번째 매개변수인 배열 내부의 각 함수들에게 인수로 전달됨
+- getFriends, getAgeLimit, getShowLimit 함수들은 상탯값에 있는 데이터를 단순히 전달하는 역할을 하며, 이 함수들도 선택자 함수임
+- 아래 두 함수의 첫 번째 인자로 입력된 배열 요소들의 각 반환값은 두 번째 인자로 입력된 함수의 매개변수로 순서에 맞게 전달됨
+- getFriendsWithAgeShowLimit 함수는 getFriendsWithAgeLimit 함수 이용
+
+### 선택자 함수 사용하기
+
+> FriendMain.js 파일의 mapStateToProps 함수 수정
+
+```javascript
+// ...
+import {
+  getAgeLimit,
+  getShowLimit,
+  getFriendsWithAgeLimit,
+  getFriendsWithAgeShowLimit,
+} from "../state/selector";
+
+// ...
+const mapStateToProps = (state) => {
+  return {
+    ageLimit: getAgeLimit(state),
+    showLimit: getShowLimit(state),
+    friendsWithAgeLimit: getFriendsWithAgeLimit(state),
+    friendsWithAgeShowLimit: getFriendsWithAgeShowLimit(state),
+  };
+};
+// ...
+```
+
+- 이전보다 코드가 간결해짐
+- 선택자 함수는 다른 컴포넌트에서도 쉽게 가져다 쓸 수 있음
+
+## reselect에서 컴포넌트의 속성값 이용하기
+
+> 선택자 함수는 상탯값 외에도 속성값을 입력받을 수 있음
+> 속성값을 이용하면 컴포넌트의 각 인스턴스에 특화된 값 반환 가능
+
+### 속성값 넘겨주기
+
+> index.js 파일 수정
+
+```javascript
+// ...
+ReactDOM.render(
+  <Provider store={store}>
+    <div>
+      <FriendMain ageLimit={30} />
+      <FriendMain ageLimit={15} />
+    </div>
+  </Provider>,
+  document.getElementById("root")
+);
+```
+
+- 연령 제한 정보를 속성값으로 전달
+- FriendMain 컴포넌트의 인스턴스는 두 개가 됨
+
+### 속성값을 선택자 함수로 전달하기
+
+> FriendMain.js 파일 수정
+
+```javascript
+// ...
+class FriendMain extends Component {
+  // ...
+  render() {
+    const { friendsWithAgeLimit } = this.props;
+    return (
+      <div>
+        <button onClick={this.onAdd}>친구 추가</button>
+        <FriendList friends={friendsWithAgeLimit} />
+      </div>
+    );
+  }
+}
+
+const mapStateToProps = (state, props) => {
+  return {
+    friendsWithAgeLimit: getFriendsWithAgeLimit(state, props),
+  };
+};
+
+export default connect(mapStateToProps, actions)(FriendMain);
+```
+
+- render 메서드는 필요한 코드만 남김
+- mapStateToProps 함수는 두 번째 매개변수로 컴포넌트의 속성값을 받을 수 있음
+- 선택자 함수의 인수로 상탯값과 속성값을 모두 전달
+
+### 선택자 함수 수정하기
+
+> seletor.js 파일의 getAgeLimit 함수 수정
+
+```javascript
+// ...
+export const getAgeLimit = (state, props) => props.ageLimit;
+// ...
+```
+
+- 연령 제한 정보를 속성값으로부터 가져옴
+- getFriendsWithAgeLimit으로 전달된 인수는 해당 함수의 첫 번째 매개변수인 배열 요소들에 각각 전달되기 때문에 getAgeLimit 함수의 매개변수를 수정함으로써 연령 제한값을 수정할 수 있음
+- 코드를 실행하면 의도한 대로 동작하는 것을 확인 가능
+
+### 문제점
+
+- reselct에서 제공하는 메모이제이션 기능이 동작하지 않음
+- 두 개의 FriendMain 컴포넌트 인스턴스가 서로 다른 연령 제한 속성값을 갖기 때문
+- 두 인스턴스는 같은 선택자 함수를 다른 속성값으로 호출하기 때문에,
+  각 인스턴스 입장에서는 친구 목록과 연령 제한 정보가 변경되지 않더라도 선택자 함수의 입장에서 연령 제한 정보가 변경됨
+- 즉, 선택자 함수는 이전의 결괏값을 재사용하지 못하고 매번 반복해서 연산을 수행함
+
+*※ getFriendsWithAgeLimit 함수에 콘솔 로그를 추가하고, TimelineMain 컴포넌트를 렌더링한 후 '타임라인 추가'버튼을 눌러보면 친구 목록/연령 제한이 변경되지 않았음에도 콘솔 로그가 출력되는 것을 확인할 수 있음*
+
+## 컴포넌트 인스턴스별로 독립된 메모이제이션 적용하기
+
+> 컴포넌트 인스턴스별로 독립된 메모이제이션 기능을 제공하기 위해서는 선택자 함수도 여러 인스턴스로 만들어져야 함
+
+### 선택자 함수 수정하기
+
+> selector.js 파일 수정
+
+```javascript
+// ...
+export const makeGetFriendsWithAgeLimit = () => {
+  return createSelector([getFriends, getAgeLimit], (friends, ageLimit) =>
+    friends.filter((friend) => friend.age <= ageLimit)
+  );
+};
+```
+
+-  기존 getFriendsWithAgeLimit, getFriendsWithAgeShowLimit 함수는 삭제
+- 선택자 함수를 생성하는 함수 정의
+- 각 컴포넌트 인스턴스가 makeGetFriendsWithAgeLimit 함수를 호출하면 자신만의 선택자 함수를 가질 수 있음
+
+### 선택자 함수 호출 컴포넌트 수정하기
+
+> FriendMain.js 파일 수정
+
+```javascript
+// ...
+import { makeGetFriendsWithAgeLimit } from "../state/selector";
+
+// ...
+const makeMapStateToProps = () => {
+  const getFriendsWithAgeLimit = makeGetFriendsWithAgeLimit();
+  const mapStateToProps = (state, props) => {
+    return {
+      friendsWithAgeLimit: getFriendsWithAgeLimit(state, props),
+    };
+  };
+  return mapStateToProps;
+};
+
+export default connect(makeMapStateToProps, actions)(FriendMain);
+
+```
+
+- mapStateToProps를 생성하는 makeMapStateToProps 함수 정의
+- connect 함수의 첫 번째 매개변수로 전달된 함수가 새로운 함수를 반환하면, react-redux는 각 컴포넌트의 인스턴스별로 독립적인 mapStateToProps 함수의 인스턴스를 만들어서 사용
+- mapStateToProps 함수가 생성될 때마다 getFriendsWithAgeLimit 선택자 함수도 생성됨
+- 생성된 mapStateToProps 함수는 바로 위에서 생성된 선택자 함수를 기억하는 클로저가 됨
+- 결과적으로 각 컴포넌트 인스턴스는 각자의 getFriendsWithAgeLimit 함수를 확보하는 셈
+
+*※ makeGetFriendsWithAgeLimit 함수에 콘솔 로그를 추가한 뒤 '타임 라인 추가' 버튼을 클릭해보면 이제 해당 함수가 호출되지 않는 것을 확인할 수 있음*
