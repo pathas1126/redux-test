@@ -1567,3 +1567,589 @@ export default connect(makeMapStateToProps, actions)(FriendMain);
 - 결과적으로 각 컴포넌트 인스턴스는 각자의 getFriendsWithAgeLimit 함수를 확보하는 셈
 
 *※ makeGetFriendsWithAgeLimit 함수에 콘솔 로그를 추가한 뒤 '타임 라인 추가' 버튼을 클릭해보면 이제 해당 함수가 호출되지 않는 것을 확인할 수 있음*
+
+# 리덕스 사가를 이용한 비동기 액션 처리
+
+> 리덕스 사가는 리덕스에서 비동기 액션 처리를 위해 사용되는 패키지 중 하나
+
+## 비동기 액션 처리에 많이 사용되는 리덕스 패키지
+
+>  API 호출을 통해서 서버로부터 데이터를 받아 오는 것이 대표적인 비동기 코드
+
+| 패키지명         | 선택 기준                                                    | 특징                                                         |
+| ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| redux-thunk      | 여러 개의 비동기 코드가 중첩되지 않음<br />비동기 코드의 로직이 간단함 | 가장 간단하게 시작 가능                                      |
+| redux-observable | 비동기 코드가 많이 사용됨                                    | RxJS 패키지를 기반으로 만들어져서 리액티브 프로그래밍을 공부해야 하기 때문에 진입 장벽이 가장 높음 |
+| redux-saga       | 비동기 코드가 많이 사용됨                                    | 제너레이터를 적극적으로 활용<br />테스트 코드 작성이 쉬움    |
+
+## 리덕스 사가 개요
+
+- ES6의 제너레이터를 기반으로 만들어짐
+- 모든 부수 효과가 리덕스의 액션 객체처럼 자바스크립트 객체로 표현
+- API 통신을 위한 설정을 하지 않고도 테스트 코드를 쉽게 작성 가능
+
+## 리덕스 사가 시작하기
+
+### 구현 기능
+
+- 타임라인에 '좋아요' 기능 추가
+- '좋아요' 버튼 클릭 시 서버로 이벤트 전송 후 클라이언트에서는 좋아요 숫자를 증가시킴
+
+### 리덕스 코드 리팩터링
+
+> timeline 폴더 밑에 state 폴더 생성
+> timeline/state.js 파일의 경로를 timeline/state/index.js 파일로 변경
+> 해당 파일을 아래 코드로 수정
+
+```javascript
+import createReducer from "../../common/createReducer";
+import createItemsLogic from "../../common/createItemsLogic";
+import mergeReducers from "../../common/mergeReducers";
+// ... import 문 common 경로 수정
+
+const { add, remove, edit, reducer: timelineReducer } = createItemsLogic(
+  "timelines"
+);
+
+export const types = {
+  INCREASE_NEXT_PAGE: "timeline/INCREASE_NEXT_PAGE",
+  REQUEST_LIKE: "timeline/REQUEST_LIKE",
+  ADD_LIKE: "timeline/ADD_LIKE",
+  SET_LOADING: "timeline/SET_LOADING",
+};
+
+export const actions = {
+  addTimeline: add,
+  removeTimeline: remove,
+  editTimeline: edit,
+  increaseNextPage: () => ({ type: types.INCREASE_NEXT_PAGE }),
+  requestLike: (timeline) => ({ type: types.REQUEST_LIKE, timeline }),
+  addLike: (timelineId, value) => ({ type: types.ADD_LIKE, timelineId, value }),
+  setLoading: (isLoading) => ({ type: types.SET_LOADING, isLoading }),
+};
+
+const INITIAL_STATE = { nextPage: 0, isLoading: false };
+const reducer = createReducer(INITIAL_STATE, {
+  [types.INCREASE_NEXT_PAGE]: (state, action) => (state.nextPage += 1),
+  [types.ADD_LIKE]: (state, action) => {
+    const timeline = state.timelines.find(
+      (item) => item.id === action.timelineId
+    );
+    if (timeline) {
+      timeline.likes += action.value;
+    }
+  },
+  [types.SET_LOADING]: (state, action) => (state.isLoading = action.isLoading),
+});
+
+const reducers = [reducer, timelineReducer];
+export default mergeReducers(reducers);
+```
+
+- 리덕스 사가에서 사용할 목적으로 모든 액션 타입을 types 객체에 담아서 내보냄
+- 액션 생성자 함수들도 actions 객체에 담아서 내보냄
+- REQUEST_LIKE 액션 타입은 '좋아요' 버튼을 클릭하면 발생하는 액션 타입으로 이 액션 타입은 리덕스 사가에서만 사용되고 리듀서 함수에서는 사용되지 않음
+- ADD_LIKE: '좋아요' 숫자를 변경할 때 사용할 액션 타입
+- SET_LOADING: 로딩 여부를 알려 줄 액션 타입
+- 초기 상탯값에 로딩 상태 추가
+
+### 리액트 컴포넌트에 좋아요 기능 추가
+
+> timeline/component/TimelineList.js 파일 수정
+> 각 타임라인에 '좋아요' 버튼 추가
+
+```jsx
+import React from "react";
+
+function TimelineList({ timelines, onLike }) {
+  return (
+    <ul>
+      {timelines.map(({ id, desc, likes }) => (
+        <li key={id}>
+          {desc}
+          <button data-id={id} onClick={onLike}>{`좋아요(${likes})`}</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default TimelineList;
+```
+
+- 좋아요 버튼에 반응하는 이벤트 처리 함수는 속성값으로 받음
+- 좋아요 버튼 추가
+- 이벤트 처리 함수에 타임라인 객체의 id 정보를 넘기기 위해 데이터 세트 이용
+
+### 컨테이너 수정
+
+> TimelineMain.js 수정
+
+```jsx
+// ...
+import { actions } from "../state";
+
+class TimelineMain extends Component {
+  componentDidMount() {
+    this.unsubscribe = store.subscribe(() => this.forceUpdate());
+  }
+
+  componentWillUnmout() {
+    this.unsubscribe();
+  }
+
+  onAdd = () => {
+    const timeline = getNextTimeline();
+    store.dispatch(actions.addTimeline(timeline));
+  };
+
+  onLike = (e) => {
+    const { timelines } = this.props;
+    const id = Number(e.target.dataset.id);
+    const timeline = timelines.find((item) => item.id === id);
+    this.props.requestLike(timeline);
+  };
+
+  render() {
+    const { timelines, isLoading } = this.props;
+    return (
+      <div>
+        <button onClick={this.onAdd}>타임라인 추가</button>
+        <TimelineList timelines={timelines} onLike={this.onLike} />
+        {!!isLoading && <p>전송 중...</p>}
+      </div>
+    );
+  }
+}
+
+const mapStateToProps = (state) => ({
+  timelines: state.timeline.timelines,
+  isLoading: state.timeline.isLoading,
+});
+
+export default connect(mapStateToProps, actions)(TimelineMain);
+```
+
+- 좋아요 버튼에 반응하는 onLike 이벤트 처리 함수 작성
+- requestLike 함수는 REQUEST_LIKE 액션을 발생시키는 함수
+
+## 사가 함수 작성하기
+
+> **사가 함수**: 부수 효과 함수를 이용해서 하나의 완성된 로직을 담고 있는 함수
+>
+> 리덕스 사가에서는 API 통신, 리덕스 액션 발생 등의 부수 효과를 허용
+> 단, 부수 효과를 사용하려면 리덕스 사가에서 제공하는 함수를 이용해야 함
+
+### 설치
+
+```bash
+$ npm i redux-saga
+```
+
+### 좋아요 이벤트 처리 사가 함수 작성
+
+> timeline/state/saga.js 파일 생성 후 아래 코드 입력
+
+```javascript
+import { all, call, put, take, fork } from "redux-saga/effects";
+import { actions, types } from "./index";
+import { callApiLike } from "../../common/api";
+
+export function* fetchData(action) {
+  while (true) {
+    const { timeline } = yield take(types.REQUEST_LIKE);
+    yield put(actions.setLoading(true));
+    yield put(actions.addLike(timeline.id, 1));
+    yield call(callApiLike);
+    yield put(actions.setLoading(false));
+  }
+}
+
+export default function* watcher() {
+  yield all([fork(fetchData)]);
+}
+```
+
+- fetchData: REQUEST_LIKE 액션을 처리하는 제너레이터 함수이며, 이를 사가 함수라고 함
+
+- while 문을 사용하여 무한 반복하도록 함
+
+- take: 인수로 전달된 액션 타입을 기다림, 여러 개의 액션을 기다릴 수도 있음
+  REQUEST_LIKE 액션이 발생하면 다음 줄의 코드가 실행되며,
+  yield take는 액션 객체 반환
+
+- put: 새로운 액션을 발생시킴
+  결과적으로 store.dispatch 메서드를 호출하는 효과가 있음
+
+- call: 입력된 함수를 대신 호출함
+  입력된 함수가 프로미스를 반환하면 프로미스가 처리됨 상태가 될 때까지 기다림
+
+- watcher: 여러 개의 사가 함수를 모아 놓은 함수이며, 사가 미들웨어에 입력
+
+- all, fork: 사가 함수를 추가할 때 사용하는 함수로 사가 함수를 추가할 때는 아래와 같이 작성
+
+  ```javascript
+  yield all([fork(f1), fork(f2)]);
+  ```
+
+  
+
+*※ take, put, call 등의 함수가 반환하는 값은 해야 할 일을 설명하는 자바스크립트 객체*
+
+## 작업 마무리하기
+
+### API 호출 함수 작성
+
+> common 폴더 밑에 api.js 파일 생성 후 아래 코드 입력
+
+```javascript
+export function callApiLike() {
+  return new Promise((resolve, reject) => {
+    setTimeout(resolve, 1000);
+  });
+}
+```
+
+- callApiLike 함수는 1초 뒤에 이행됨 상태가 되는 프로미스 객체 반환
+
+### 리덕스에 사가 미들웨어 추가 및 결과
+
+> common/store.js 파일 수정
+
+```javascript
+import { createStore, combineReducers, applyMiddleware } from "redux";
+import timelineReducer from "../timeline/state";
+import friendReducer from "../friend/state";
+import createSagaMiddleware from "redux-saga";
+import timelineSaga from "../timeline/state/saga";
+
+const reducer = combineReducers({
+  timeline: timelineReducer,
+  friend: friendReducer,
+});
+
+const sagaMiddleware = createSagaMiddleware();
+const store = createStore(reducer, applyMiddleware(sagaMiddleware));
+export default store;
+sagaMiddleware.run(timelineSaga);
+```
+
+- createSagaMiddleware 함수로 사가 미들웨어 생성 후 applyMiddleware 함수를 이용해서 store 생성 시 입력
+- sagaMiddleware에 앞에서 작성한 timelineSaga 함수 입력
+- npm start 명령어를 실행하고 타임라인 추가 후 '좋아요' 버튼을 눌러 보면 좋아요 숫자가 증가하며 1초간 '전송 중' 문구가 표시됐다가 사라짐
+
+## 여러 개의 액션이 협업하는 사가 함수
+
+> 원한다면 서로 연관된 다수의 액션을 하나의 사가 함수에서 사용 가능
+
+### 로그인/로그아웃 액션을 처리하는 사가 함수
+
+```javascript
+function* loginFlow() {
+    while (true) {
+        const { id, password } = yield take(types.LOGIN);
+        const userInfo = yield call(callApiLogin, id, password);
+        yield put(types.SET_USER_INFO, userInfo);
+        yield take(types.LOGOUT);
+        yield call(callApiLogout, id);
+        yield put(types.SET_USER_INFO, null);
+    }
+}
+```
+
+- 로그인 액션이 발생할 때까지 대기
+- 로그인 액션이 발생하면 서버로 로그인 요청을 보냄
+- 서버로부터 사용자 정보가 도착하면 사용자 정보를 저장하는 액션 발생
+- 로그아웃도 로그인과 같은 순서로 진행되며 다시 로그인 액션을 기다림
+
+## 사가 함수의 예외 처리
+
+### 예외 발생 코드 작성
+
+> common/api.js 파일의 callApiLike 함수가 간헐적으로 거부됨 상태의 프로미스를 반환하도록 코드 작성
+
+```javascript
+export function callApiLike() {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      if (Math.random() * 10 < 5) {
+        resolve();
+      } else {
+        reject("callApiLike 실패");
+      }
+    }, 1000);
+  });
+}
+```
+
+- Math.random 함수를 이용해서 간헐적으로 프로미스 객체가 거부됨 상태가 되도록 함
+
+### 에러 정보 출력 코드 작성
+
+> 예외 발생 시 사용자가 에러 정보를 확인할 수 있도록 timeline/container/TimelineMain.js 파일 수정
+
+```jsx
+// ...
+class TimelineMain extends Component {
+   // ...
+   render() {
+    const { timelines, isLoading, error } = this.props;
+    return (
+      <div>
+      	// ...
+        {!!error && <p>에러 발생: {error}</p>}
+      </div>
+    );
+  }
+}
+
+const mapStateToProps = (state) => ({
+	// ...
+    error: state.timeline.error,
+});
+// ...
+```
+
+- 에러가 발생하면 화면에 출력
+- 리덕스 상탯값으로부터 에러 값을 가져옴
+
+### 에러 정보 리덕스에서 처리하기
+
+> timeline/state/index.js 파일 수정
+
+```javascript
+// ...
+export const types = {
+	// ...
+    SET_ERROR: "timeline/SET_ERROR",
+};
+
+export const actions = {
+  // ...
+  setError: (error) => ({ type: types.SET_ERROR, error }),
+};
+
+const INITIAL_STATE = { nextPage: 0, isLoading: false, error: "" };
+
+const reducer = createReducer(INITIAL_STATE, {
+  // ...
+  [types.SET_ERROR]: (state, action) => (state.error = action.error),
+});
+// ...
+```
+
+- 에러 정보를 저장하는 SET_ERROR 액션 타입 추가
+- error 상탯값의 초깃값은 빈 문자열
+
+### 에러 정보 사가 함수에서 처리하기 및 결과
+
+> timeline/state/saga.js 파일 수정
+
+```javascript
+// ...
+export function* fetchData(action) {
+  while (true) {
+    const { timeline } = yield take(types.REQUEST_LIKE);
+    yield put(actions.setLoading(true));
+    yield put(actions.addLike(timeline.id, 1));
+    yield put(actions.setError(""));
+    try {
+      yield call(callApiLike);
+    } catch (error) {
+      yield put(actions.setError(error));
+      yield put(actions.addLike(timeline.id, -1));
+    }
+    yield put(actions.setLoading(false));
+  }
+}
+// ...
+```
+
+- 새로운 '좋아요' 요청이 들어오면 이전 에러 정보 초기화
+- callApiLike에서 프로미스 객체를 거부됨 상태로 만드는 경우를 처리하기 위해 try catch 문 사용
+- 프로미스 객체가 거부됨 상태가 되면 에러 객체를 저장하는 액션 발생
+- 미리 증가시켰던 좋아요 숫자를 감소시키는 액션 발생
+- npm start로 프로젝트를 실행해서 '좋아요' 버튼을 누르다 보면 에러 메시지가 출력됨
+
+## 리덕스 사가로 디바운스 구현하기
+
+> 디바운스(debounce):  같은 함수가 연속해서 호출될 때 첫 번째 또는 마지막 호출만 실행하는 기능
+> 사가에서 제공하는 debounce 부수 효과 함수를 이용해서 디바운스 구현
+
+### 구현 기능
+
+- 타임라인에 새로운 내용을 등록할 수 있도록 문자열 입력창 추가
+- 연속해서 문자열을 입력하다가 일정 시간 동안 입력이 없을 때 리덕스의 상탯값을 변경
+
+### 리덕스에서 문자열 처리하기
+
+> timeline/state/index.js 파일 수정
+
+```javascript
+// ...
+export const types = {
+  // ...
+  SET_TEXT: "timeline/SET_TEXT",
+  TRY_SET_TEXT: "timeline/TRY_SET_TEXT",
+};
+
+export const actions = {
+  // ...
+  setText: (text) => ({ type: types.SET_TEXT, text }),
+  trySetText: (text) => ({ type: types.TRY_SET_TEXT, text }),
+};
+
+const INITIAL_STATE = { nextPage: 0, isLoading: false, error: "", text: "" };
+const reducer = createReducer(INITIAL_STATE, {
+  // ...
+  [types.SET_TEXT]: (state, action) => (state.text = action.text),
+});
+```
+
+- SET_TEXT: 리덕스의 text 상탯값을 변경하는 액션 타입 추가
+- TRY_SET_TEXT: 리덕스의 text 상탯값 변경을 시도하는 액션 타입,
+  사가 함수에서만 사용하므로 리듀서에서는 처리하지 않음
+- text 상탯값의 초깃값으로 빈 문자열 입력
+
+### 문자열 입력창 출력
+
+> timeline/container/TimelineMain.js 파일 수정
+
+```javascript
+// ...
+class TimelineMain extends Component {
+  state = {
+    currentText: "",
+  };
+  // ...
+  onChangeText = (e) => {
+    const text = e.currentTarget.value;
+    this.props.trySetText(text);
+    this.setState({ currentText: text });
+  };
+
+  render() {
+    const { timelines, isLoading, error, text } = this.props;
+    const { currentText } = this.state;
+    return (
+      <div>
+        // ...
+        <input type="text" value={currentText} onChange={this.onChangeText} />
+        {!!text && <p>{text}</p>}
+      </div>
+    );
+  }
+}
+
+const mapStateToProps = (state) => ({
+  // ...
+  text: state.timeline.text,
+});
+```
+
+- state: 현재 입력 중인 문자열을 컴포넌트 상탯값에 저장
+- trySetText: 문자열을 입력할 때마다 TRY_SET_TEXT 액션을 발생시킴
+- 리덕스에 저장된 text를 입력창 아래쪽에 출력
+
+### 사가 함수에 deounce 함수 추가하기 및 결과
+
+> timeline/state/saga.js 파일 수정
+
+```javascript
+import { all, call, put, take, fork, debounce } from "redux-saga/effects";
+// ...
+
+export function* trySetText(action) {
+  const { text } = action;
+  yield put(actions.setText(text));
+}
+// ...
+export default function* watcher() {
+  yield all([fork(fetchData), debounce(500, types.TRY_SET_TEXT, trySetText)]);
+}
+```
+
+- TRY_SET_TEXT 액션이 발생하고 0.5초 동안 재발생하지 않으면 trySetText 사가 함수 실행
+- npm start 명령어로 프로젝트를 실행 후, 문자열을 연속으로 입력하면 리덕스의 상탯값을 출력하는 문자열이 변경되지 않다가 입력을 멈추면 하단의 문자열이 가장 최신의 문자열로 변경됨
+
+## 사가 함수 테스트하기
+
+> 리덕스 사가는 특히 테스트 코드 작성 시 빛을 발함
+> 일반적으로 API 통신과 같은 비동기 코드의 테스트를 위해서는 모조(mock) 객체를 생성해야 하지만 리덕스 사가에서는 모조 객체가 필요 없음
+> ∵ 부수 효과 함수를 호출한 결과가 간단한 자바스크립트 객체임
+
+### 설치
+
+> 리덕스 사가는 테스트 코드 작성을 지원하기 위해 별도의 패키지 제공
+
+```bash
+$ npm i @redux-saga/testing-utils
+```
+
+### fetchData 함수 다시보기
+
+> 테스트 코드를 작성하기 위한 fetchData 함수
+
+```javascript
+export function* fetchData(action) {
+  while (true) {
+    const { timeline } = yield take(types.REQUEST_LIKE);
+    yield put(actions.setLoading(true));
+    yield put(actions.addLike(timeline.id, 1));
+    yield put(actions.setError(""));
+    try {
+      yield call(callApiLike);
+    } catch (error) {
+      yield put(actions.setError(error));
+      yield put(actions.addLike(timeline.id, -1));
+    }
+    yield put(actions.setLoading(false));
+  }
+}
+```
+
+### fetchData 함수 테스트 코드 작성하기
+
+> timeline/state 폴더 밑에 saga.test.js 파일 생성 후 아래 코드 입력
+
+```javascript
+import { take, put, call } from "redux-saga/effects";
+import { cloneableGenerator } from "@redux-saga/testing-utils";
+import { types, actions } from "./index";
+import { fetchData } from "./saga";
+import { callApiLike } from "../../common/api";
+
+describe("fetchData", () => {
+  // 테스트에 사용될 데이터
+  const timeline = { id: 1 };
+  const action = actions.requestLike(timeline);
+    
+  // 복사 가능한 제너레이터 객체 생성
+  const gen = cloneableGenerator(fetchData)();
+    
+  expect(gen.next().value).toEqual(take(types.REQUEST_LIKE));
+  expect(gen.next(action).value).toEqual(put(actions.setLoading(true)));
+  expect(gen.next().value).toEqual(put(actions.addLike(timeline.id, 1)));
+  expect(gen.next(action).value).toEqual(put(actions.setError("")));
+  expect(gen.next().value).toEqual(call(callApiLike));
+  it("on fail callApiLike", () => {
+    const gen2 = gen.clone();
+    const errorMsg = "error";
+    expect(gen2.throw(errorMsg).value).toEqual(put(actions.setError(errorMsg)));
+    expect(gen2.next().value).toEqual(put(actions.addLike(timeline.id, -1)));
+  });
+  it("on success callApiLike", () => {
+    const gen2 = gen.clone();
+    expect(gen2.next(Promise.resolve()).value).toEqual(
+      put(actions.setLoading(false))
+    );
+    expect(gen2.next().value).toEqual(take(types.REQUEST_LIKE));
+  });
+});
+```
+
+- cloneableGenerator 함수를 이용하면 복사가 가능한 제너레이터 객체 생성 가능
+  → 제너레이터 객체를 복사하면 다양한 경우를 테스트하기 좋음
+- fetchData 함수를 직접 호출해도 제너레이터 객체가 생성되긴 하지만 복사 기능은 없음
+- expect ~ toEqual을 사용해서 차례대로 테스트 코드 작성
+- CRA에는 테스팅 프레임워크인 jest가 내장되어 있기 때문에 npm test 명령어를 입력하면 콘솔창에서 테스트 결과를 확인할 수 있음
